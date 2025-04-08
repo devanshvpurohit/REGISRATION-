@@ -2,181 +2,130 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Event Registration</title>
+  <title>Admin QR Check-in</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- EmailJS -->
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-
-  <!-- QR Code Generator -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
     body {
-      font-family: "Segoe UI", sans-serif;
-      background: #000;
-      color: #fff;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      padding: 40px;
-      flex-direction: column;
-    }
-
-    h2 {
-      color: #ff4d4d;
-      margin-bottom: 20px;
-    }
-
-    form {
-      background: #1a1a1a;
-      padding: 25px 30px;
-      border-radius: 10px;
-      box-shadow: 0 0 20px rgba(255, 0, 0, 0.2);
-      max-width: 400px;
-      width: 100%;
-    }
-
-    input {
-      width: 100%;
-      padding: 12px;
-      margin: 10px 0;
-      border-radius: 6px;
-      border: 1px solid #ff4d4d;
-      font-size: 15px;
-      background-color: #000;
-      color: #fff;
-    }
-
-    input::placeholder {
-      color: #ccc;
-    }
-
-    button {
-      width: 100%;
-      padding: 12px;
-      background-color: #ff4d4d;
+      background-color: #111;
       color: white;
-      border: none;
-      font-size: 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      margin-top: 10px;
-    }
-
-    button:hover {
-      background-color: #cc0000;
-    }
-
-    #message {
-      margin-top: 20px;
-      font-weight: 500;
-      color: #ff4d4d;
+      font-family: sans-serif;
       text-align: center;
+      padding: 20px;
     }
 
-    #qrcanvas {
+    #scanner {
+      width: 300px;
+      margin: auto;
+    }
+
+    #status {
       margin-top: 20px;
-      border: 2px solid #ff4d4d;
       padding: 10px;
-      background: #fff;
-      border-radius: 10px;
-      display: none;
+      border-radius: 8px;
+      transition: background 0.3s;
+    }
+
+    .green {
+      background-color: #2ecc71;
+      color: black;
+    }
+
+    .red {
+      background-color: #e74c3c;
     }
   </style>
 </head>
 <body>
-
-  <h2>Event Registration</h2>
-
-  <form id="regForm">
-    <input type="text" id="name" placeholder="Your Name" required />
-    <input type="text" id="roll" placeholder="Roll Number" required />
-    <input type="email" id="email" placeholder="Email Address" required />
-    <button type="submit">Register</button>
-  </form>
-
-  <canvas id="qrcanvas"></canvas>
-  <div id="message"></div>
+  <h2>Admin QR Check-in</h2>
+  <div id="scanner"></div>
+  <div id="status">Scan a QR Code...</div>
 
   <script>
-    emailjs.init("oQesVLGv8IcrnyBZI");
+    const REG_TABLE = "498245";     // Registration table
+    const CHECKIN_TABLE = "498531"; // Check-in log table
+    const TOKEN = "beSz1ZWotwcbWpHFC5qyKlABSVpsVxcQ";
+    const HEADERS = {
+      "Authorization": `Token ${TOKEN}`,
+      "Content-Type": "application/json"
+    };
+    const statusDiv = document.getElementById("status");
 
-    const BASEROW_TOKEN = "beSz1ZWotwcbWpHFC5qyKlABSVpsVxcQ";
-    const TABLE_API_URL = "https://api.baserow.io/api/database/rows/table/498245/?user_field_names=true";
+    async function postToCheckin(user) {
+      const url = `https://api.baserow.io/api/database/rows/table/${CHECKIN_TABLE}/?user_field_names=true`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: HEADERS,
+        body: JSON.stringify({
+          Name: user.Name,
+          Roll: user.Roll,
+          Email: user.Email,
+          timestamp: new Date().toISOString()
+        })
+      });
+      return response.json();
+    }
 
-    document.getElementById("regForm").addEventListener("submit", async function (e) {
-      e.preventDefault();
+    async function deleteFromRegistration(rowId) {
+      const url = `https://api.baserow.io/api/database/rows/table/${REG_TABLE}/${rowId}/`;
+      return fetch(url, { method: "DELETE", headers: { "Authorization": `Token ${TOKEN}` } });
+    }
 
-      const name = document.getElementById("name").value.trim();
-      const roll = document.getElementById("roll").value.trim();
-      const email = document.getElementById("email").value.trim();
-      const canvas = document.getElementById("qrcanvas");
-      const msg = document.getElementById("message");
-
-      msg.textContent = "⏳ Checking for duplicates...";
-      canvas.style.display = "none";
-
+    async function handleScan(qrText) {
       try {
-        // Step 1: Fetch existing entries
-        const res = await fetch(TABLE_API_URL, {
-          headers: {
-            Authorization: `Token ${BASEROW_TOKEN}`
-          }
-        });
-        const data = await res.json();
+        const lines = qrText.split("\n");
+        const name = lines[0].split(": ")[1];
+        const roll = lines[1].split(": ")[1];
+        const email = lines[2].split(": ")[1];
 
-        const duplicate = data.results.find(row =>
+        statusDiv.textContent = "🔍 Checking database...";
+        statusDiv.className = "";
+
+        const regRes = await fetch(`https://api.baserow.io/api/database/rows/table/${REG_TABLE}/?user_field_names=true`, {
+          headers: { "Authorization": `Token ${TOKEN}` }
+        });
+        const regData = await regRes.json();
+
+        const user = regData.results.find(row =>
           row.Roll?.toLowerCase() === roll.toLowerCase() ||
           row.Email?.toLowerCase() === email.toLowerCase()
         );
 
-        if (duplicate) {
-          msg.textContent = "⚠️ This Roll Number or Email is already registered.";
+        if (!user) {
+          statusDiv.textContent = "⚠️ Already checked in or not registered.";
+          statusDiv.className = "red";
           return;
         }
 
-        // Step 2: Generate QR
-        const qrData = `Name: ${name}\nRoll: ${roll}\nEmail: ${email}`;
-        await QRCode.toCanvas(canvas, qrData);
-        const qrBase64 = canvas.toDataURL("image/png");
-        canvas.style.display = "block";
+        await postToCheckin(user);
+        await deleteFromRegistration(user.id);
 
-        // Step 3: Submit to Baserow
-        const saveRes = await fetch(TABLE_API_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Token ${BASEROW_TOKEN}`
-          },
-          body: JSON.stringify({
-            Name: name,
-            Roll: roll,
-            Email: email,
-            timestamp: new Date().toISOString()
-          })
-        });
+        statusDiv.textContent = `✅ Checked in: ${user.Name}`;
+        statusDiv.className = "green";
 
-        if (!saveRes.ok) {
-          throw new Error("Failed to save to Baserow");
-        }
+        // Optional: Confirm check-in
+        // const rowCheck = await fetch(`https://api.baserow.io/api/database/rows/table/${CHECKIN_TABLE}/${user.id}/?user_field_names=true`, {
+        //   headers: { "Authorization": `Token ${TOKEN}` }
+        // });
+        // const confirmed = await rowCheck.json();
 
-        // Step 4: Email using EmailJS
-        await emailjs.send("service_3krqsck", "template_5flwr9g", {
-          name: name,
-          email: email,
-          qr_code: qrBase64
-        });
+      } catch (err) {
+        console.error("Error:", err);
+        statusDiv.textContent = "❌ Error during check-in.";
+        statusDiv.className = "red";
+      }
+    }
 
-        msg.textContent = "✅ Registration successful! QR sent to your email.";
-        document.getElementById("regForm").reset();
-
-      } catch (error) {
-        console.error("Error:", error);
-        msg.textContent = "❌ Error occurred. Please try again.";
+    const html5QrCode = new Html5Qrcode("scanner");
+    Html5Qrcode.getCameras().then(devices => {
+      if (devices.length) {
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: 250 },
+          handleScan
+        );
       }
     });
   </script>
-
 </body>
 </html>
