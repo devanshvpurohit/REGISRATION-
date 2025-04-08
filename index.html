@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Event Registration</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- EmailJS -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+  <!-- QR Code Generator -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #000;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 40px;
+      flex-direction: column;
+    }
+
+    h2 {
+      color: #ff4d4d;
+      margin-bottom: 20px;
+    }
+
+    form {
+      background: #1a1a1a;
+      padding: 25px 30px;
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(255, 0, 0, 0.2);
+      max-width: 400px;
+      width: 100%;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      border-radius: 6px;
+      border: 1px solid #ff4d4d;
+      font-size: 15px;
+      background-color: #000;
+      color: #fff;
+    }
+
+    input::placeholder {
+      color: #ccc;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background-color: #ff4d4d;
+      color: white;
+      border: none;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    button:hover {
+      background-color: #cc0000;
+    }
+
+    #message {
+      margin-top: 20px;
+      font-weight: 500;
+      color: #ff4d4d;
+      text-align: center;
+    }
+
+    #qrcanvas {
+      margin-top: 20px;
+      border: 2px solid #ff4d4d;
+      padding: 10px;
+      background: #fff;
+      border-radius: 10px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Event Registration</h2>
+
+  <form id="regForm">
+    <input type="text" id="name" placeholder="Your Name" required />
+    <input type="text" id="roll" placeholder="Roll Number" required />
+    <input type="email" id="email" placeholder="Email Address" required />
+    <button type="submit">Register</button>
+  </form>
+
+  <canvas id="qrcanvas"></canvas>
+  <div id="message"></div>
+
+  <script>
+    emailjs.init("oQesVLGv8IcrnyBZI");
+
+    const BASEROW_TOKEN = "beSz1ZWotwcbWpHFC5qyKlABSVpsVxcQ";
+    const TABLE_API_URL = "https://api.baserow.io/api/database/rows/table/498245/?user_field_names=true";
+
+    document.getElementById("regForm").addEventListener("submit", async function (e) {
+      e.preventDefault();
+
+      const name = document.getElementById("name").value.trim();
+      const roll = document.getElementById("roll").value.trim();
+      const email = document.getElementById("email").value.trim();
+      const canvas = document.getElementById("qrcanvas");
+      const msg = document.getElementById("message");
+
+      msg.textContent = "⏳ Checking for duplicates...";
+      canvas.style.display = "none";
+
+      try {
+        // Step 1: Fetch existing entries
+        const res = await fetch(TABLE_API_URL, {
+          headers: {
+            Authorization: `Token ${BASEROW_TOKEN}`
+          }
+        });
+        const data = await res.json();
+
+        const duplicate = data.results.find(row =>
+          row.Roll?.toLowerCase() === roll.toLowerCase() ||
+          row.Email?.toLowerCase() === email.toLowerCase()
+        );
+
+        if (duplicate) {
+          msg.textContent = "⚠️ This Roll Number or Email is already registered.";
+          return;
+        }
+
+        // Step 2: Generate QR
+        const qrData = `Name: ${name}\nRoll: ${roll}\nEmail: ${email}`;
+        await QRCode.toCanvas(canvas, qrData);
+        const qrBase64 = canvas.toDataURL("image/png");
+        canvas.style.display = "block";
+
+        // Step 3: Submit to Baserow
+        const saveRes = await fetch(TABLE_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Token ${BASEROW_TOKEN}`
+          },
+          body: JSON.stringify({
+            Name: name,
+            Roll: roll,
+            Email: email,
+            timestamp: new Date().toISOString()
+          })
+        });
+
+        if (!saveRes.ok) {
+          throw new Error("Failed to save to Baserow");
+        }
+
+        // Step 4: Email using EmailJS
+        await emailjs.send("service_3krqsck", "template_5flwr9g", {
+          name: name,
+          email: email,
+          qr_code: qrBase64
+        });
+
+        msg.textContent = "✅ Registration successful! QR sent to your email.";
+        document.getElementById("regForm").reset();
+
+      } catch (error) {
+        console.error("Error:", error);
+        msg.textContent = "❌ Error occurred. Please try again.";
+      }
+    });
+  </script>
+
+</body>
+</html>
